@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>库存盘点系统</title>
+
+  <!-- PWA 必须 -->
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#2196f3">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="库存盘点">
+  <link rel="apple-touch-icon" href="icon.png">
+
+  <!-- 样式 -->
+  <style>
+    body { font-family: Arial, sans-serif; padding: 10px; margin: 0; padding-bottom: 160px; -webkit-overflow-scrolling: touch; }
+    .browser-guide { background:#e6f7ff; border-left:4px solid #1890ff; padding:10px 15px; margin:15px 0; border-radius:4px; font-size:14px; color:#1890ff; }
+    .highlight { color:#096dd9; font-weight:bold; }
+    h2 { text-align:center; color:#333; margin:20px 0; font-size:24px; }
+    .summary { background:#f5f7fa; padding:10px 15px; border-radius:6px; margin:10px 0; display:flex; justify-content:space-between; font-size:16px; }
+    .summary span { color:#1890ff; font-weight:bold; }
+    table { border-collapse:collapse; width:100%; margin:15px 0; background:white; box-shadow:0 2px 5px rgba(0,0,0,0.05); }
+    th, td { border:1px solid #eee; padding:10px 8px; text-align:center; font-size:14px; }
+    th { background-color:#fafafa; font-weight:bold; position:sticky; top:0; z-index:1; }
+    td[contenteditable] { background:#fff8dc; cursor:text; }
+    tr.duplicate { background-color:#fff2f0; }
+    .delete-btn { background:#ff4d4f; color:white; padding:6px 12px; font-size:14px; border:none; border-radius:4px; cursor:pointer; }
+    .primary-btn { background:#1890ff; color:white; padding:14px 0; border:none; border-radius:8px; cursor:pointer; font-size:16px; flex:1; min-width:120px; }
+    .import-label { display:inline-block; padding:14px 0; background:#1890ff; color:white; border-radius:8px; cursor:pointer; font-size:16px; flex:1; min-width:120px; text-align:center; }
+    #fileInput, #batchFileInput { display:none; }
+    .batch-upload { margin:15px 0; padding:15px; background:#f9f9f9; border-radius:8px; }
+    .batch-label { display:inline-block; padding:10px 15px; background:#faad14; color:white; border-radius:6px; cursor:pointer; font-size:15px; margin-right:10px; }
+    .search-bar { position:fixed; bottom:100px; left:0; right:0; padding:15px; background:white; border-top:1px solid #eee; display:flex; justify-content:center; box-shadow:0 -2px 5px rgba(0,0,0,0.03); z-index:10; }
+    .search-bar input { width:calc(100% - 40px); padding:14px 15px; border:1px solid #ddd; border-radius:8px; font-size:16px; min-height:50px; box-sizing:border-box; }
+    .bottom-actions { position:fixed; bottom:0; left:0; right:0; padding:15px; background:white; border-top:1px solid #eee; display:flex; justify-content:center; gap:10px; z-index:10; }
+    .scroll-btn { position:fixed; width:50px; height:50px; border-radius:50%; background:#1890ff; color:white; border:none; font-size:24px; cursor:pointer; box-shadow:0 2px 8px rgba(0,0,0,0.2); display:flex; align-items:center; justify-content:center; z-index:5; opacity:0.9; }
+    .to-top { bottom:180px; right:15px; }
+    .to-bottom { bottom:115px; right:15px; }
+    .csv-container { background:#f8f9fa; border:1px solid #ddd; border-radius:6px; padding:15px; margin:15px 0; max-height:200px; overflow-y:auto; font-family:monospace; font-size:14px; white-space:pre-wrap; }
+    .copy-btn { background:#52c41a; color:white; border:none; padding:8px 16px; border-radius:4px; cursor:pointer; font-size:15px; margin:10px 0; }
+    .tip { position:fixed; top:20px; left:50%; transform:translateX(-50%); padding:12px 20px; border-radius:6px; color:white; background:#52c41a; box-shadow:0 2px 8px rgba(0,0,0,0.15); z-index:100; display:none; font-size:16px; max-width:80%; text-align:center; }
+    .modal { position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); display:none; justify-content:center; align-items:center; z-index:1000; }
+    .modal-content { background:white; padding:25px; border-radius:10px; width:80%; max-width:300px; }
+    .modal-title { font-size:18px; margin:0 0 20px 0; text-align:center; }
+    .modal-select { width:100%; padding:12px; border:1px solid #ddd; border-radius:6px; font-size:16px; margin-bottom:20px; box-sizing:border-box; }
+    .modal-buttons { display:flex; gap:10px; }
+    .modal-btn { flex:1; padding:12px; border-radius:6px; border:none; font-size:16px; cursor:pointer; }
+    .modal-cancel { background:#f5f5f5; }
+    .modal-confirm { background:#1890ff; color:white; }
+    #exportArea { display:none; }
+  </style>
+
+  <!-- Service Worker 注册 -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('service-worker.js')
+          .then(reg => console.log("Service Worker 注册成功", reg))
+          .catch(err => console.log("Service Worker 注册失败", err));
+      });
+    }
+  </script>
+
+  <!-- SheetJS -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+  <div class="browser-guide">
+    <p>🌐 <span class="highlight">ALOOK浏览器适配：</span>搜索功能已修复，支持上下滚动</p>
+  </div>
+
+  <h2>📦 库存盘点系统</h2>
+  
+  <div class="summary">
+    <div>总物料种类数：<span id="totalCount">0</span></div>
+    <div>已盘点物料种类数：<span id="countedCount">0</span></div>
+  </div>
+  
+  <div class="batch-upload">
+    <p>批量追加数据（CSV格式）：</p>
+    <label for="batchFileInput" class="batch-label">选择CSV文件</label>
+    <input type="file" id="batchFileInput" accept=".csv">
+    <span style="font-size:14px; color:#666;">格式：物料编号,名称,规格,系统数量,实际数量,存放位置</span>
+  </div>
+  
+  <table id="inventoryTable">
+    <thead>
+      <tr>
+        <th>序号</th>
+        <th>物料编号</th>
+        <th>物料名称</th>
+        <th>规格</th>
+        <th>系统数量</th>
+        <th>实际数量</th>
+        <th>存放位置</th>
+        <th>状态</th>
+        <th>操作</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <div id="exportArea">
+    <div class="csv-container" id="csvContent"></div>
+    <button class="copy-btn" id="copyBtn" onclick="copyToClipboard()">复制内容到剪贴板</button>
+  </div>
+  
+  <div class="search-bar">
+    <input type="text" id="searchInput" placeholder="搜索物料编号/名称/规格...">
+  </div>
+  
+  <div class="bottom-actions">
+    <label for="fileInput" class="import-label">重新导入</label>
+    <input type="file" id="fileInput" accept=".csv">
+    <button class="primary-btn" onclick="showFormatModal()">导出文件</button>
+    <button class="primary-btn" onclick="addNewItem()">新增物料</button>
+  </div>
+  
+  <button class="scroll-btn to-top" onclick="scrollToTop()">↑</button>
+  <button class="scroll-btn to-bottom" onclick="scrollToBottom()">↓</button>
+  
+  <div class="modal" id="formatModal">
+    <div class="modal-content">
+      <p class="modal-title">选择导出格式</p>
+      <select class="modal-select" id="exportFormat">
+        <option value="csv">CSV格式</option>
+        <option value="excel">Excel格式</option>
+      </select>
+      <div class="modal-buttons">
+        <button class="modal-btn modal-cancel" onclick="closeFormatModal()">取消</button>
+        <button class="modal-btn modal-confirm" onclick="confirmExportFormat()">确认导出</button>
+      </div>
+    </div>
+  </div>
+  
+  <div class="tip" id="tip"></div>
+
+  <script>
+    // ==== JS 功能代码（完整修复版） ====
+    let inventory = JSON.parse(localStorage.getItem("inventory")) || [];
+    let currentSearchKeyword = "";
+    let pendingImportFile = null;
+    const tbody = document.querySelector("#inventoryTable tbody");
+    const totalCountEl = document.getElementById("totalCount");
+    const countedCountEl = document.getElementById("countedCount");
+    const tipEl = document.getElementById("tip");
+    const searchInput = document.getElementById("searchInput");
+    const csvContentEl = document.getElementById("csvContent");
+    const exportArea = document.getElementById("exportArea");
+    const exportFormat = document.getElementById("exportFormat");
+    const formatModal = document.getElementById("formatModal");
+
+    document.addEventListener('DOMContentLoaded', function() {
+      renderTable();
+      updateSummary();
+      searchInput.addEventListener('input', handleSearch);
+    });
+
+    function handleSearch(e){
+      currentSearchKeyword = e.target.value.toLowerCase().trim();
+      renderTable();
+    }
+
+    function renderTable(){
+      let data = [...inventory];
+      if(currentSearchKeyword){
+        data = data.filter(item=>{
+          const code = (item.code||"").toLowerCase();
+          const name = (item.name||"").toLowerCase();
+          const spec = (item.spec||"").toLowerCase();
+          const location = (item.location||"").toLowerCase();
+          return code.includes(currentSearchKeyword)||name.includes(currentSearchKeyword)||spec.includes(currentSearchKeyword)||location.includes(currentSearchKeyword);
+        });
+      }
+      tbody.innerHTML = "";
+      data.forEach((item,index)=>{
+        const row = document.createElement("tr");
+        if(item.duplicate) row.classList.add("duplicate");
+        row.innerHTML = `
+          <td>${index+1}</td>
+          <td contenteditable="true" onblur="updateField(${inventory.indexOf(item)},'code',this.innerText)">${item.code}</td>
+          <td contenteditable="true" onblur="updateField(${inventory.indexOf(item)},'name',this.innerText)">${item.name}</td>
+          <td contenteditable="true" onblur="updateField(${inventory.indexOf(item)},'spec',this.innerText)">${item.spec}</td>
+          <td contenteditable="true" onblur="updateField(${inventory.indexOf(item)},'sysQty',this.innerText)">${item.sysQty}</td>
+          <td contenteditable="true" onblur="updateField(${inventory.indexOf(item)},'realQty',this.innerText)">${item.realQty}</td>
+          <td contenteditable="true" onblur="updateField(${inventory.indexOf(item)},'location',this.innerText)">${item.location}</td>
+          <td>${item.duplicate ? '<span style="color:#f5222d;">重复</span>' : '正常'}</td>
+          <td><button class="delete-btn" onclick="deleteRow(${inventory.indexOf(item)})">删除</button></td>
+        `;
+        tbody.appendChild(row);
+      });
+      localStorage.setItem("inventory", JSON.stringify(inventory));
+      updateSummary();
+    }
+
+    function updateField(index, field, value){
+      if(inventory[index]){
+        value = value || "";
+        if(field==='code'){
+          inventory[index].code = value;
+          const isDuplicate = inventory.some((item,i)=>i!==index && item.code===value);
+          inventory[index].duplicate = isDuplicate;
+        }else{
+          inventory[index][field] = value;
+        }
+        localStorage.setItem("inventory", JSON.stringify(inventory));
+        showTip(`已更新「${inventory[index].name || '未命名物料'}」`);
+        updateSummary();
+        renderTable();
+      }
+    }
+
+    function deleteRow(index){
+      const deletedItem = inventory[index];
+      inventory.splice(index,1);
+      checkAllDuplicates();
+      renderTable();
+      showTip(`已删除「${deletedItem.name || '未命名物料'}」`);
+    }
+
+    function checkAllDuplicates(){
+      inventory.forEach((item,index)=>{
+        const isDuplicate = inventory.some((other,i)=>i!==index && other.code===item.code);
+        item.duplicate = isDuplicate;
+      });
+    }
+
+    function addNewItem(){
+      const newItem = {
+        code: `WL${Date.now().toString().slice(-6)}`,
+        name: "未命名物料",
+        spec: "",
+        sysQty: "0",
+        realQty: "",
+        location: "",
+        duplicate: false
+      };
+      inventory.push(newItem);
+      renderTable();
+      showTip("已新增空白物料行");
+      scrollToBottom();
+    }
+
+    function showFormatModal(){
+      if(inventory.length===0){
+        showTip("没有数据可导出","error");
+        return;
+      }
+      formatModal.style.display="flex";
+    }
+
+    function closeFormatModal(){
+      formatModal.style.display="none";
+    }
+
+    function confirmExportFormat(){
+      const format = exportFormat.value;
+      closeFormatModal();
+      if(format==="csv"){
+        const content = generateCSV();
+        csvContentEl.textContent = content;
+        exportArea.style.display="block";
+        exportArea.scrollIntoView({behavior:"smooth", block:"center"});
+        triggerDownload(content, `库存盘点_${new Date().toLocaleDateString().replace(/\//g,'')}.csv`, "text/csv;charset=utf-8");
+        showTip("已生成CSV格式内容");
+      }else{
+        exportToExcel();
+      }
+    }
+
+    function generateCSV(){
+      function escapeCsvValue(value){
+        if(!value) return "";
+        const str=value.toString().trim();
+        if(str.includes(',')||str.includes('"')||str.includes('\n')){
+          return `"${str.replace(/"/g,'""')}"`;
+        }
+        return str;
+      }
+      let csv="序号,物料编号,物料名称,规格,系统数量,实际数量,存放位置\n";
+      inventory.forEach((item,index)=>{
+        const row=[
+          index+1,
+          escapeCsvValue(item.code),
+          escapeCsvValue(item.name),
+          escapeCsvValue(item.spec),
+          escapeCsvValue(item.sysQty),
+          escapeCsvValue(item.realQty),
+          escapeCsvValue(item.location)
+        ].join(',')+'\n';
+        csv+=row;
+      });
+      return csv;
+    }
+
+    function exportToExcel(){
+      const ws = XLSX.utils.json_to_sheet(inventory.map((item,index)=>({
+        序号:index+1,
+        物料编号:item.code,
+        物料名称:item.name,
+        规格:item.spec,
+        系统数量:item.sysQty,
+        实际数量:item.realQty,
+        存放位置:item.location
+      })));
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "库存盘点");
+      XLSX.writeFile(wb, `库存盘点_${new Date().toLocaleDateString().replace(/\//g,'')}.xlsx`);
+      showTip("已生成Excel格式文件");
+    }
+
+    function triggerDownload(content, fileName, mimeType){
+      try{
+        const bom = new Uint8Array([0xEF,0xBB,0xBF]);
+        const blob = new Blob([bom, content], {type:mimeType});
+        const url = URL.createObjectURL(blob);
+        const a=document.createElement('a');
+        a.href=url;
+        a.download=fileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(()=>URL.revokeObjectURL(url),100);
+      }catch(err){
+        showTip("下载已准备，请手动复制内容保存","error");
+      }
+    }
+
+    function copyToClipboard(){
+      const text = csvContentEl.textContent;
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(text).then(()=>{showTip("内容已复制到剪贴板");}).catch(()=>fallbackCopy(text));
+      }else fallbackCopy(text);
+    }
+
+    function fallbackCopy(text){
+      const textarea=document.createElement("textarea");
+      textarea.value=text;
+      textarea.style.position="fixed";
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textarea);
+      showTip("内容已复制到剪贴板");
+    }
+
+    document.getElementById("batchFileInput").addEventListener("change",function(e){
+      const file=e.target.files[0];
+      if(!file) return;
+      const reader=new FileReader();
+      reader.onload=function(event){
+        try{
+          const content=event.target.result;
+          const lines=content.split("\n").map(l=>l.trim()).filter(l=>l);
+          if(lines.length===0){showTip("CSV文件内容为空","error");return;}
+          let newCount=0;
+          lines.forEach((line,i)=>{
+            const cols=line.split(",").map(c=>c.trim());
+            if(i===0 && cols[0]==="物料编号") return;
+            if(cols.length>=6){
+              const [code,name,spec,sysQty,realQty,location]=cols;
+              const existingIndex=inventory.findIndex(item=>item.code===code);
+              if(existingIndex>=0){
+                inventory[existingIndex].duplicate=true;
+              }else{
+                inventory.push({code,name:name||"",spec:spec||"",sysQty:sysQty||"0",realQty:realQty||"",location:location||"",duplicate:false});
+                newCount++;
+              }
+            }
+          });
+          renderTable();
+          showTip(`批量追加完成：新增${newCount}条`);
+        }catch(err){showTip("批量导入失败，请检查格式","error");}
+      };
+      reader.readAsText(file,"UTF-8");
+      this.value="";
+    });
+
+    document.getElementById("fileInput").addEventListener("change",function(e){
+      const file=e.target.files[0];
+      if(!file) return;
+      pendingImportFile=file;
+      if(confirm("确定要重新导入数据吗？当前数据将被覆盖。")) confirmImport();
+      else this.value="";
+    });
+
+    function confirmImport(){
+      if(!pendingImportFile) return;
+      const reader=new FileReader();
+      reader.onload=function(event){
+        try{
+          const content=event.target.result;
+          const lines=content.split("\n").map(l=>l.trim()).filter(l=>l);
+          if(lines.length===0){showTip("CSV文件内容为空","error");return;}
+          inventory=[];
+          lines.forEach((line,i)=>{
+            const cols=line.split(",").map(c=>c.trim());
+            if(i===0 && cols[0]==="物料编号") return;
+            if(cols.length>=6){
+              const [code,name,spec,sysQty,realQty,location]=cols;
+              const duplicateInFile=inventory.some(item=>item.code===code);
+              inventory.push({code,name:name||"",spec:spec||"",sysQty:sysQty||"0",realQty:realQty||"",location:location||"",duplicate:duplicateInFile});
+            }
+          });
+          renderTable();
+          showTip(`重新导入完成：共${inventory.length}条`);
+        }catch(err){showTip("导入失败，请检查格式","error");}
+        finally{pendingImportFile=null;}
+      };
+      reader.readAsText(pendingImportFile,"UTF-8");
+    }
+
+    function updateSummary(){
+      totalCountEl.textContent=inventory.length;
+      const counted=inventory.filter(item=>item.realQty!=="" && !isNaN(item.realQty)).length;
+      countedCountEl.textContent=counted;
+    }
+
+    function showTip(text,type="success"){
+      tipEl.textContent=text;
+      tipEl.style.background=type==="success"? "#52c41a":"#ff4d4f";
+      tipEl.style.display="block";
+      clearTimeout(window.tipTimer);
+      window.tipTimer=setTimeout(()=>tipEl.style.display="none",3500);
+    }
+
+    function scrollToTop(){window.scrollTo({top:0,behavior:"smooth"});}
+    function scrollToBottom(){window.scrollTo({top:document.documentElement.scrollHeight,behavior:"smooth"});}
+  </script>
+</body>
+</html>
+         
