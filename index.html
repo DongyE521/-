@@ -401,8 +401,9 @@
   
   <!-- 提示消息框 -->
   <div class="tip" id="tip"></div>
-  <!-- Service Worker 注册 -->
-      if ('serviceWorker' in navigator) {
+    <!-- Service Worker 注册 -->
+  <script>
+    if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
         navigator.serviceWorker.register('service-worker.js', { scope: './' })
          .then(reg => console.log("Service Worker 注册成功", reg))
