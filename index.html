@@ -445,7 +445,7 @@
       </select>
       <div class="modal-buttons">
         <button class="modal-btn modal-cancel" onclick="closeFormatModal()">取消</button>
-        <button class="modal-btn modal-confirm" onclick="confirmExportFormat()">确认
+        <button class="modal-btn modal-confirm" onclick="confirmExportFormat()">确认导出
                 </button>
       </div>
     </div>
@@ -472,15 +472,15 @@
   <!-- 核心功能脚本 -->
   <script>
     // 防抖函数：延迟执行，避免频繁触发
-      function debounce(func, delay) {
-        let timer;
-        return function() {
-          clearTimeout(timer);
-          timer = setTimeout(() => {
-            func.apply(this, arguments);
-          }, delay);
-        };
-      }
+    function debounce(func, delay) {
+      let timer;
+      return function() {
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+          func.apply(this, arguments);
+        }, delay);
+      };
+    }
     // 全局变量：物料库与盘点数据完全分离
     let inventory = JSON.parse(localStorage.getItem("inventory")) || []; // 盘点清单数据
     let materialMap = JSON.parse(localStorage.getItem("materialMap")) || {}; // 物料库（单独存储）
@@ -600,7 +600,7 @@
       document.getElementById('imgModal').style.display = 'none';
     }
 
-    // 更新物料字段（支持自动填充）
+    // 更新物料字段（增强重复检测）
     function updateField(index, field, value) {
       if (inventory[index]) {
         value = value || "";
@@ -615,12 +615,9 @@
             item.spec = item.spec || materialMap[code].spec; // 保留手动输入
             showTip(`已自动更新料号「${code}」的信息`);
           }
-        }
-
-        // 检查重复
-        if (field === "code") {
-          const isDuplicate = inventory.some((item, i) => i!== index && item.code === value);
-          inventory[index].duplicate = isDuplicate;
+          
+          // 料号变更时立即全面检查重复项
+          checkAllDuplicates();
         }
 
         localStorage.setItem("inventory", JSON.stringify(inventory));
@@ -643,6 +640,7 @@
         imageUrl: null  // 新增图片URL属性
       };
       inventory.push(newItem);
+      checkAllDuplicates(); // 新增后检查重复项
       renderTable(); // 先渲染，确保行索引正确
       showTip("新增物料行：输入料号/型号后稍等自动填充");
       scrollToBottom();
@@ -707,7 +705,7 @@
       const deletedItem = inventory[index];
       if (!deletedItem) return;
       inventory.splice(index, 1);
-      checkAllDuplicates();
+      checkAllDuplicates(); // 删除后重新检测重复项
       // 记录删除操作到历史
       operationHistory.push({ 
         type: 'delete', 
@@ -727,18 +725,33 @@
       const lastOp = operationHistory.pop();
       if (lastOp.type === 'delete') {
         inventory.splice(lastOp.index, 0, lastOp.item); 
-        checkAllDuplicates();
+        checkAllDuplicates(); // 恢复后检查重复项
         localStorage.setItem("inventory", JSON.stringify(inventory));
         renderTable();
         showTip(`已恢复「${lastOp.item.name || '未命名物料'}」`);
       }
     }
 
-    // 批量检查重复
+    // 批量检查重复（优化版）
     function checkAllDuplicates() {
-      inventory.forEach((item, index) => {
-        const isDuplicate = inventory.some((other, i) => i!== index && other.code === item.code);
-        item.duplicate = isDuplicate;
+      // 先清空所有重复标记
+      inventory.forEach(item => item.duplicate = false);
+      
+      // 建立料号频率映射表
+      const codeFrequency = {};
+      inventory.forEach(item => {
+        const code = item.code.trim();
+        if (code) { // 仅对非空料号进行重复检查
+          codeFrequency[code] = (codeFrequency[code] || 0) + 1;
+        }
+      });
+      
+      // 标记重复项（出现次数≥2的料号）
+      inventory.forEach(item => {
+        const code = item.code.trim();
+        if (code && codeFrequency[code] >= 2) {
+          item.duplicate = true;
+        }
       });
     }
 
@@ -798,7 +811,7 @@
       const count = Object.keys(materialMap).length;
       materialLibCountEl.textContent = count;
     }
-    // 导出功能相关
+        // 导出功能相关
     function showFormatModal() {
       if (inventory.length === 0) {
         showTip("没有数据可导出", "error");
@@ -858,14 +871,14 @@
     // 生成CSV内容
     function generateCSV() {
       function escapeCsvValue(value) {
-              if (!value) return "";
+        if (!value) return "";
         const str = value.toString().trim();
         if (str.includes(',') || str.includes('"') || str.includes('\n')) {
           return `"${str.replace(/"/g, '""')}"`;
         }
         return str;
       }
-      let csv = "物料编号,物料名称,规格,系统数量,实际数量,存放位置\n";
+      let csv = "物料编号,物料名称,规格,系统数量,实际数量,存放位置,状态\n";
       inventory.forEach((item) => {
         const row = [
           escapeCsvValue(item.code),
@@ -873,7 +886,8 @@
           escapeCsvValue(item.spec),
           escapeCsvValue(item.sysQty),
           escapeCsvValue(item.realQty),
-          escapeCsvValue(item.location)
+          escapeCsvValue(item.location),
+          item.duplicate? "重复" : "正常"
         ].join(',') + '\n';
         csv += row;
       });
@@ -889,7 +903,8 @@
         规格: item.spec,
         系统数量: item.sysQty,
         实际数量: item.realQty,
-        存放位置: item.location
+        存放位置: item.location,
+        状态: item.duplicate? "重复" : "正常"
       })));
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "库存盘点");
@@ -898,7 +913,7 @@
       showTip(`已生成Excel文件：${fileName}.xlsx`);
     }
 
-    // 批量导入盘点数据（不影响物料库）
+    // 批量导入盘点数据（强化重复检测）
     function handleBatchImport(e) {
       const file = e.target.files[0];
       if (!file) return;
@@ -912,30 +927,35 @@
             return;
           }
           let newCount = 0;
+          let duplicateCount = 0;
+          
           lines.forEach((line, i) => {
             const cols = line.split(",").map(c => c.trim());
             if (i === 0 && (cols[0] === "序号" || cols[0] === "物料编号")) return;
             const dataCols = cols.length === 7? cols.slice(1) : cols;
             if (dataCols.length >= 6) {
               const [code, name, spec, sysQty, realQty, location] = dataCols;
-              const existingIndex = inventory.findIndex(item => item.code === code);
-              if (existingIndex >= 0) {
-                inventory[existingIndex].duplicate = true;
-              } else {
-                inventory.push({
-                  code, name: name || "", spec: spec || "",
-                  sysQty: sysQty || "0", realQty: realQty || "",
-                  location: location || "", duplicate: false,
-                  imageUrl: null  // 新增图片URL属性
-                });
-                newCount++;
-              }
+              inventory.push({
+                code, name: name || "", spec: spec || "",
+                sysQty: sysQty || "0", realQty: realQty || "",
+                location: location || "", duplicate: false,
+                imageUrl: null
+              });
+              newCount++;
             }
           });
+          
+          // 批量导入后全面检查重复项
+          checkAllDuplicates();
+          
+          // 统计重复项数量
+          duplicateCount = inventory.filter(item => item.duplicate).length;
+          
           renderTable();
-          showTip(`批量追加完成：新增${newCount}条盘点数据`);
+          showTip(`批量追加完成：新增${newCount}条数据，发现${duplicateCount}条重复料号`);
         } catch (err) {
           showTip("批量导入失败，请检查格式", "error");
+          console.error(err);
         }
         this.value = "";
       };
@@ -990,15 +1010,18 @@
             const dataCols = cols.length === 7? cols.slice(1) : cols;
             if (dataCols.length >= 6) {
               const [code, name, spec, sysQty, realQty, location] = dataCols;
-              const duplicateInFile = inventory.some(item => item.code === code);
               inventory.push({
                 code, name: name || "", spec: spec || "",
                 sysQty: sysQty || "0", realQty: realQty || "",
-                location: location || "", duplicate: duplicateInFile,
-                imageUrl: null  // 新增图片URL属性
+                location: location || "", duplicate: false,
+                imageUrl: null
               });
             }
           });
+          
+          // 导入完成后检查重复项
+          checkAllDuplicates();
+          
           localStorage.setItem("inventory", JSON.stringify(inventory));
           renderTable();
           showTip(`重新导入完成：共${inventory.length}条盘点数据`);
