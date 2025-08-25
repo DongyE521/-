@@ -215,32 +215,6 @@
       cursor: pointer; 
       box-sizing: border-box; 
     }
-    /* 滚动按钮 */
-   .scroll-btn { 
-      position: fixed; 
-      width: 50px; 
-      height: 50px; 
-      border-radius: 50%; 
-      background: #1890ff; 
-      color: white; 
-      border: none; 
-      font-size: 24px; 
-      cursor: pointer; 
-      box-shadow: 0 2px 8px rgba(0,0,0,0.2); 
-      display: flex; 
-      align-items: center; 
-      justify-content: center; 
-      z-index: 5; 
-      opacity: 0.9; 
-    }
-   .to-top { 
-      bottom: 180px; 
-      right: 15px; 
-    }
-   .to-bottom { 
-      bottom: 115px; 
-      right: 15px; 
-    }
     /* 提示消息框 */
    .tip { 
       position: fixed; 
@@ -1020,14 +994,6 @@
       setTimeout(() => {
         tipEl.style.display = "none";
       }, 3000);
-    }
-
-    function scrollToTop() {
-      tbody.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
-
-    function scrollToBottom() {
-      tbody.scrollIntoView({ behavior: "smooth", block: "end" });
     }
 
     function updateSummary() {
