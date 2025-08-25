@@ -531,12 +531,12 @@
         const itemIndex = inventory.indexOf(item); // 获取物料在原数组的真实索引
         const imgInputId = `imgInput_${item.code || itemIndex}_${index}`; // 唯一ID
 
-        // 修复2：图片按钮切换逻辑（根据是否有imageUrl显示对应按钮）
-        const imgBtnHtml = item.imageUrl ? 
-          `<button class="view-img-btn" onclick="openImageModal('${item.imageUrl}')">查看图片</button>` : 
-          `<label class="upload-img-btn" for="${imgInputId}">上传图片</label>
-           <input type="file" id="${imgInputId}" class="img-file-input" accept="image/*" 
-                  onchange="handleImageUpload(${itemIndex}, this)">`;
+        // 修复：适配 Blob URL 预览（iOS PWA 可用）
+const imgBtnHtml = inventory[index].imageBlobUrl ? 
+  `<button class="view-img-btn" onclick="openImageModal('${inventory[index].imageBlobUrl}')">查看图片</button>` : 
+  `<label class="upload-img-btn" for="${imgInputId}">上传图片</label>
+   <input type="file" id="${imgInputId}" class="img-file-input" accept="image/*" 
+          onchange="handleImageUpload(${itemIndex}, this)">`;
 
         // 表格行内容（操作列嵌入图片按钮）
         row.innerHTML = `
@@ -560,28 +560,26 @@
       updateSummary();
     }
 
-    // 6. 图片上传与预览：修复2——上传后清空输入框+强制重新渲染
-    function handleImageUpload(index, input) {
-      const file = input.files[0];
-      if (!file || !file.type.startsWith('image/')) {
-        showTip("请选择JPG/PNG格式的图片", "error");
-        return;
-      }
+    // 修复：iOS PWA 兼容——用 Blob URL 替代 Base64 存储图片
+function handleImageUpload(index, input) {
+  const file = input.files[0];
+  if (!file || !file.type.startsWith('image/')) {
+    showTip("请选择JPG/PNG格式的图片", "error");
+    return;
+  }
 
-      const reader = new FileReader();
-      reader.onload = function(e) {
-        // 保存图片Base64地址到盘点数据
-        inventory[index].imageUrl = e.target.result;
-        localStorage.setItem("inventory", JSON.stringify(inventory));
-        
-        // 修复3：清空文件输入框（避免重复上传同一文件无反应）
-        input.value = "";
-        // 重新渲染表格，确保按钮切换为“查看图片”
-        renderTable(); 
-        showTip("图片上传成功");
-      };
-      reader.readAsDataURL(file);
-    }
+  // 关键：生成临时 Blob URL（iOS PWA 支持更好）
+  const blobUrl = URL.createObjectURL(file);
+  // 存储 Blob URL 和文件名（用于后续预览/清理）
+  inventory[index].imageBlobUrl = blobUrl;
+  inventory[index].imageFileName = file.name;
+  localStorage.setItem("inventory", JSON.stringify(inventory));
+
+  // 清空输入框+重新渲染
+  input.value = "";
+  renderTable(); 
+  showTip("图片上传成功，可查看");
+}
 
     // 图片预览模态框：打开
     function openImageModal(imageUrl) {
@@ -1065,6 +1063,14 @@
     window.handleSearch = handleSearch;
     window.parseCSVLine = parseCSVLine;
     window.debounce = debounce;
+    // 页面关闭/刷新时，清理所有 Blob URL（避免 iOS 内存泄漏）
+window.addEventListener('beforeunload', function() {
+  inventory.forEach(item => {
+    if (item.imageBlobUrl) {
+      URL.revokeObjectURL(item.imageBlobUrl); // 释放资源
+    }
+  });
+});
   </script>
 </body>
 </html>
