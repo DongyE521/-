@@ -490,29 +490,39 @@
 
     // 3. ⭐ 新增：通用规格匹配函数（解决自动识别问题的核心）
     function handleSpecMatch(specInput, rowIndex) {
-      let specAutoFilled = false; // 避免重复填充
-      specInput.addEventListener("input", debounce(() => {
-        const spec = specInput.innerText.trim().toLowerCase();
-        // 输入非空+有物料库数据才触发匹配
-        if (!specAutoFilled && spec && rowIndex > -1 && Object.keys(materialMap).length > 0) {
-          // 遍历物料库找匹配规格
-          for (const code in materialMap) {
-            const libSpec = (materialMap[code].spec || "").toLowerCase();
-            if (libSpec.includes(spec)) { // 宽松匹配：物料库规格包含输入内容
-              // 填充料号、名称、规格到当前行
-              inventory[rowIndex].code = code;
-              inventory[rowIndex].name = materialMap[code].name;
-              inventory[rowIndex].spec = materialMap[code].spec;
-              specAutoFilled = true;
-              localStorage.setItem("inventory", JSON.stringify(inventory));
-              renderTable(); // 重新渲染表格显示结果
-              showTip(`已匹配规格「${spec}」→ 料号「${code}」`);
-              break; // 找到第一个匹配项即停止
-            }
-          }
+  let specAutoFilled = false;
+
+  // 方案：失焦（点击其他地方）或按回车时触发匹配
+  function triggerMatch() {
+    const spec = specInput.innerText.trim().toLowerCase();
+    if (!specAutoFilled && spec && rowIndex > -1 && Object.keys(materialMap).length > 0) {
+      for (const code in materialMap) {
+        const libSpec = (materialMap[code].spec || "").toLowerCase();
+        if (libSpec.includes(spec)) {
+          inventory[rowIndex].code = code;
+          inventory[rowIndex].name = materialMap[code].name;
+          inventory[rowIndex].spec = materialMap[code].spec;
+          specAutoFilled = true;
+          localStorage.setItem("inventory", JSON.stringify(inventory));
+          renderTable();
+          showTip(`已匹配规格「${spec}」→ 料号「${code}」`);
+          break;
         }
-      }, 500)); // 500ms防抖，平衡响应速度与性能
+      }
     }
+  }
+
+  // 绑定失焦事件（点击其他地方）
+  specInput.addEventListener("blur", triggerMatch);
+  // 绑定回车事件（输入完按回车）
+  specInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault(); // 阻止回车换行
+      triggerMatch();
+      specInput.blur(); // 失焦，避免光标停留
+    }
+  });
+}
 
     // 4. 全局变量：存储盘点数据、物料库、操作历史
     let inventory = JSON.parse(localStorage.getItem("inventory")) || [];
